@@ -236,4 +236,4 @@ Status: confirmed
 ## Notes
 
 - Some event URLs point to generic company pages rather than specific event pages. The Claude prompt should instruct: "If the crawled text does not describe a specific Cannes event, note this in the summary."
-- The master sheet must be publicly readable (or shared with the Modal service) so the MCP server can fetch it via CSV export without auth.
+- The enrichment script sets the master sheet to "anyone with the link can view" via the Google Drive API after creation. This allows the MCP server on Modal to fetch it via CSV export without auth.
