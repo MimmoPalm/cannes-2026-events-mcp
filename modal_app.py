@@ -1,4 +1,4 @@
-"""Cannes Lions 2026 -- StreamableHTTP MCP server on Modal."""
+"""Cannes Lions 2026 -- StreamableHTTP MCP server on Modal (v2: enriched data)."""
 
 import modal
 
@@ -6,30 +6,34 @@ image = modal.Image.debian_slim(python_version="3.12").pip_install(
     "mcp>=1.9.0",
     "httpx>=0.27.0",
     "uvicorn>=0.34.0",
+    "thefuzz[speedup]>=0.22.0",
 )
 
 app = modal.App("cannes-lions-mcp", image=image)
 
 
-@app.function(scaledown_window=300)
+@app.function(
+    scaledown_window=300,
+    secrets=[modal.Secret.from_name("cannes-lions-config")],
+)
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()
 def web():
     import csv
     import io
+    import os
 
     import httpx
+    from thefuzz import fuzz
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.streamable_http import TransportSecuritySettings
 
-    # ── Sheet config ─────────────────────────────────────────────────────
-    SCHEDULE_SHEET_ID = "1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE"
-    SCHEDULE_GID = "1111568312"
-    REGISTRATION_SHEET_ID = "1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8"
-    REGISTRATION_GID = "835495045"
+    # ── Master sheet config from Modal secrets ─────────────────────────
+    MASTER_SHEET_ID = os.environ.get("MASTER_SHEET_ID", "")
+    EVENTS_GID = os.environ.get("EVENTS_GID", "0")
+    UNREG_GID = os.environ.get("UNREG_GID", "")
     CSV_TEMPLATE = "https://docs.google.com/spreadsheets/d/{id}/gviz/tq?tqx=out:csv&gid={gid}"
-    SCHEDULE_COLS = {"event": 0, "host": 1, "time": 2, "location": 3, "link": 4, "details": 5}
 
-    # ── Helpers ───────────────────────────────────────────────────────────
     def _fetch_csv(sheet_id: str, gid: str) -> list[dict[str, str]]:
         url = CSV_TEMPLATE.format(id=sheet_id, gid=gid)
         resp = httpx.get(url, timeout=30)
@@ -38,7 +42,7 @@ def web():
         rows = list(reader)
         if not rows:
             return []
-        headers = [h.strip() for h in rows[0]]
+        headers = [h.strip().lower() for h in rows[0]]
         data = []
         for row in rows[1:]:
             if not any(cell.strip() for cell in row):
@@ -49,35 +53,50 @@ def web():
             data.append(record)
         return data
 
-    def _fetch_schedule_raw() -> list[list[str]]:
-        url = CSV_TEMPLATE.format(id=SCHEDULE_SHEET_ID, gid=SCHEDULE_GID)
-        resp = httpx.get(url, timeout=30)
-        resp.raise_for_status()
-        reader = csv.reader(io.StringIO(resp.text))
-        return list(reader)
+    def _load_events() -> list[dict[str, str]]:
+        if not MASTER_SHEET_ID:
+            return []
+        return _fetch_csv(MASTER_SHEET_ID, EVENTS_GID)
 
-    def _col(row: list[str], key: str) -> str:
-        idx = SCHEDULE_COLS[key]
-        return row[idx].strip() if idx < len(row) else ""
+    def _load_unmatched_regs() -> list[dict[str, str]]:
+        if not MASTER_SHEET_ID or not UNREG_GID:
+            return []
+        return _fetch_csv(MASTER_SHEET_ID, UNREG_GID)
 
-    def _format_row(row: list[str]) -> str:
-        parts = [
-            f"**{_col(row, 'event')}**",
-            f"Host: {_col(row, 'host')}",
-            f"Time: {_col(row, 'time')}",
-            f"Location: {_col(row, 'location')}",
-        ]
-        link = _col(row, "link")
-        if link and link != "Coming soon":
-            parts.append(f"Link: {link}")
-        details = _col(row, "details")
-        if details:
-            parts.append(f"Details: {details[:300]}")
+    def _format_event(e: dict) -> str:
+        parts = [f"**{e.get('event_name', '')}**"]
+        host = e.get("host", "")
+        ctype = e.get("company_type", "")
+        if host:
+            parts.append(f"Host: {host}" + (f" ({ctype})" if ctype and ctype != "other" else ""))
+        day = e.get("day", "").title()
+        date = e.get("date", "")
+        start = e.get("start_time", "")
+        end = e.get("end_time", "")
+        time_str = f"{start}-{end}" if start and end else start or ""
+        if day:
+            parts.append(f"Day: {day} {date}" + (f" | {time_str}" if time_str else ""))
+        loc = e.get("location", "")
+        if loc:
+            parts.append(f"Location: {loc}")
+        audience = e.get("target_audience", "")
+        if audience:
+            parts.append(f"Audience: {audience}")
+        etype = e.get("event_type", "")
+        if etype and etype != "other":
+            parts.append(f"Type: {etype}")
+        summary = e.get("crawled_summary", "")
+        if summary:
+            parts.append(f"Summary: {summary}")
+        reg = e.get("registration_url", "")
+        if reg:
+            parts.append(f"Registration: {reg}")
+        status = e.get("status", "")
+        if status and status != "confirmed":
+            parts.append(f"Status: {status}")
         parts.append("---")
         return "\n".join(parts)
 
-    # ── MCP server ───────────────────────────────────────────────────────
-    from mcp.server.streamable_http import TransportSecuritySettings
     mcp = FastMCP(
         "cannes-lions",
         stateless_http=True,
@@ -85,84 +104,162 @@ def web():
     )
 
     @mcp.tool()
-    def search_schedule(query: str) -> str:
-        """Search the Cannes Lions 2026 event schedule by keyword. Matches across event name, host, location, and details."""
-        rows = _fetch_schedule_raw()
+    def search_schedule(query: str, limit: int = 15) -> str:
+        """Search the Cannes Lions 2026 event schedule by keyword. Matches across event_name, host, location, details, crawled_summary."""
+        events = _load_events()
         q = query.lower()
-        matches = [
-            row for row in rows[1:]
-            if any(cell.strip() for cell in row) and q in " ".join(c.lower() for c in row)
-        ]
+        matches = []
+        for e in events:
+            searchable = " ".join([
+                e.get("event_name", ""), e.get("host", ""),
+                e.get("location", ""), e.get("details", ""),
+                e.get("crawled_summary", ""),
+            ]).lower()
+            if q in searchable:
+                matches.append(e)
         if not matches:
             return f"No events matching '{query}'."
-        result = "\n".join(_format_row(m) for m in matches[:15])
+        capped = matches[:limit]
+        result = "\n\n".join(_format_event(m) for m in capped)
         return f"Found {len(matches)} events matching '{query}':\n\n{result}"
 
     @mcp.tool()
     def list_schedule_by_day(day: str) -> str:
-        """List all Cannes events for a specific day (sunday, monday, tuesday, wednesday, thursday)."""
-        rows = _fetch_schedule_raw()
-        d = day.lower()
-        day_keywords = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-        matches = []
-        in_section = False
-        for row in rows[1:]:
-            if not any(cell.strip() for cell in row):
-                continue
-            first = row[0].lower() if row else ""
-            is_day_header = any(dk in first for dk in day_keywords)
-            if is_day_header:
-                in_section = d in first
-                continue
-            if in_section:
-                matches.append(row)
+        """List all Cannes events for a specific day (sunday/monday/tuesday/wednesday/thursday/friday). Returns events sorted by start time."""
+        events = _load_events()
+        d = day.lower().strip()
+        matches = [e for e in events if e.get("day", "").lower() == d]
+        matches.sort(key=lambda e: e.get("start_time", "zz"))
         if not matches:
             return f"No events found for '{day}'."
-        result = "\n".join(_format_row(m) for m in matches[:25])
-        return f"Events for {day.title()}:\n\n{result}"
+        result = "\n\n".join(_format_event(m) for m in matches)
+        return f"Events for {day.title()} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
     def list_schedule_by_host(host: str) -> str:
         """Find all events hosted by a specific company at Cannes Lions 2026."""
-        rows = _fetch_schedule_raw()
+        events = _load_events()
         h = host.lower()
-        matches = [
-            row for row in rows[1:]
-            if any(cell.strip() for cell in row) and h in _col(row, "host").lower()
-        ]
+        matches = [e for e in events if h in e.get("host", "").lower()]
         if not matches:
             return f"No events found hosted by '{host}'."
-        result = "\n".join(_format_row(m) for m in matches[:15])
-        return f"Events hosted by {host}:\n\n{result}"
+        result = "\n\n".join(_format_event(m) for m in matches)
+        return f"Events hosted by {host} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def search_registrations(company: str) -> str:
-        """Search the Cannes registration links sheet by company name."""
-        data = _fetch_csv(REGISTRATION_SHEET_ID, REGISTRATION_GID)
-        q = company.lower()
-        matches = [e for e in data if q in list(e.values())[0].lower()]
+    def recommend_events(role: str, day: str = "", limit: int = 20) -> str:
+        """Recommend Cannes Lions 2026 events based on your role (publisher, brand, agency, adtech, creator, senior_leader). Optionally filter by day."""
+        events = _load_events()
+        role_stem = role.lower().strip().rstrip("s")
+        matches = []
+        for e in events:
+            audience = e.get("target_audience", "").lower()
+            audience_parts = [a.strip() for a in audience.split(",")]
+            if any(a.startswith(role_stem) or a == "everyone" for a in audience_parts):
+                if day and e.get("day", "").lower() != day.lower().strip():
+                    continue
+                matches.append(e)
+        matches.sort(key=lambda e: (e.get("day", ""), e.get("start_time", "zz")))
         if not matches:
-            return f"No registration links found for '{company}'."
-        lines = []
-        for m in matches[:10]:
-            vals = list(m.values())
-            name = vals[0] if len(vals) > 0 else "?"
-            url = vals[1] if len(vals) > 1 else "N/A"
-            notes = vals[2] if len(vals) > 2 else ""
-            lines.append(f"**{name}**\n  Registration: {url}\n  Notes: {notes}\n")
-        return "\n".join(lines)
+            return f"No events found for role '{role}'" + (f" on {day}" if day else "") + "."
+        capped = matches[:limit]
+        result = "\n\n".join(_format_event(m) for m in capped)
+        header = f"Recommended events for {role}" + (f" on {day.title()}" if day else "")
+        return f"{header} ({len(matches)} total, showing {len(capped)}):\n\n{result}"
+
+    @mcp.tool()
+    def filter_events(audience: str = "", company_type: str = "", event_type: str = "", day: str = "") -> str:
+        """Filter Cannes Lions 2026 events by multiple criteria. All parameters optional, combine any. Example: audience=publishers, event_type=happy_hour, day=wednesday."""
+        events = _load_events()
+        matches = events
+        if day:
+            matches = [e for e in matches if e.get("day", "").lower() == day.lower().strip()]
+        if audience:
+            a = audience.lower().strip()
+            matches = [e for e in matches if a in e.get("target_audience", "").lower()]
+        if company_type:
+            ct = company_type.lower().strip()
+            matches = [e for e in matches if e.get("company_type", "").lower() == ct]
+        if event_type:
+            et = event_type.lower().strip()
+            matches = [e for e in matches if e.get("event_type", "").lower() == et]
+        matches.sort(key=lambda e: (e.get("day", ""), e.get("start_time", "zz")))
+        if not matches:
+            filters = []
+            if day: filters.append(f"day={day}")
+            if audience: filters.append(f"audience={audience}")
+            if company_type: filters.append(f"company_type={company_type}")
+            if event_type: filters.append(f"event_type={event_type}")
+            return f"No events matching filters: {', '.join(filters)}."
+        result = "\n\n".join(_format_event(m) for m in matches)
+        return f"Filtered events ({len(matches)} total):\n\n{result}"
+
+    @mcp.tool()
+    def get_event_details(event_name: str) -> str:
+        """Get full details for a specific Cannes Lions 2026 event. Uses fuzzy matching on event name."""
+        events = _load_events()
+        if not events:
+            return "No events data available."
+        best_match = None
+        best_score = 0
+        for e in events:
+            score = fuzz.token_set_ratio(event_name.lower(), e.get("event_name", "").lower())
+            if score > best_score:
+                best_score = score
+                best_match = e
+        if not best_match or best_score < 50:
+            return f"No event found matching '{event_name}'."
+        return _format_event(best_match)
+
+    @mcp.tool()
+    def find_registration(company: str) -> str:
+        """Find registration info for a company at Cannes Lions 2026. Searches both matched events and unmatched registrations."""
+        events = _load_events()
+        c = company.lower()
+        event_matches = []
+        for e in events:
+            if e.get("registration_url") and c in e.get("host", "").lower():
+                event_matches.append(e)
+        unreg = _load_unmatched_regs()
+        unreg_matches = [r for r in unreg if c in r.get("company", "").lower()]
+        if not event_matches and not unreg_matches:
+            return f"No registration info found for '{company}'."
+        parts = []
+        if event_matches:
+            parts.append(f"**Events with registration ({len(event_matches)}):**\n")
+            for e in event_matches:
+                parts.append(f"- {e.get('event_name', '')}: {e.get('registration_url', '')}")
+                if e.get("registration_notes"):
+                    parts.append(f"  Notes: {e.get('registration_notes')}")
+        if unreg_matches:
+            parts.append(f"\n**Other registrations ({len(unreg_matches)}):**\n")
+            for r in unreg_matches:
+                parts.append(f"- {r.get('company', '')}: {r.get('registration_url', '')}")
+                if r.get("notes"):
+                    parts.append(f"  Notes: {r.get('notes')}")
+        return "\n".join(parts)
 
     @mcp.tool()
     def list_registrations() -> str:
-        """List all known Cannes event registration links."""
-        data = _fetch_csv(REGISTRATION_SHEET_ID, REGISTRATION_GID)
+        """List all known Cannes Lions 2026 event registration links."""
+        events = _load_events()
+        seen = set()
         lines = []
-        for e in data:
-            vals = list(e.values())
-            name = vals[0] if len(vals) > 0 else ""
-            url = vals[1] if len(vals) > 1 else ""
-            if name and "company or event" not in name.lower():
-                lines.append(f"- **{name}**: {url}")
-        return "\n".join(lines)
+        for e in events:
+            url = e.get("registration_url", "")
+            host = e.get("host", "")
+            if url and url not in seen:
+                seen.add(url)
+                lines.append(f"- **{host}**: {url}")
+        unreg = _load_unmatched_regs()
+        for r in unreg:
+            url = r.get("registration_url", "")
+            company = r.get("company", "")
+            if url and url not in seen:
+                seen.add(url)
+                lines.append(f"- **{company}**: {url}")
+        if not lines:
+            return "No registration links available."
+        return f"Registration links ({len(lines)} total):\n\n" + "\n".join(lines)
 
     return mcp.streamable_http_app()
