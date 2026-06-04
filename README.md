@@ -1,4 +1,4 @@
-# Cannes Lions 2026 MCP Server
+# Cannes Lions 2026 MCP Events  
 
 MCP server that lets AI agents query Cannes Lions 2026 event schedules and registration links.
 
