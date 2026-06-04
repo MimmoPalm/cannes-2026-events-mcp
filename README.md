@@ -17,8 +17,8 @@ Both sheets are published to web (no auth required). This MCP server simply wrap
 
 | Sheet | Source | Curation |
 |---|---|---|
-| [Full Schedule](https://docs.google.com/spreadsheets/d/1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE) | The Digital Voice x Emily Palmer | Events, times, locations, hosts, details |
-| [Registration Links](https://docs.google.com/spreadsheets/d/1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8) | Community-sourced | Company name + registration URL |
+| [Full Schedule](https://docs.google.com/spreadsheets/d/1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE) | The Digital Voice | Events, times, locations, hosts, details |
+| [Registration Links](https://docs.google.com/spreadsheets/d/1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8) | Created by Emily Palmer and it's Community-sourced | Company name + registration URL |
 
 ## Tools
 
@@ -51,7 +51,7 @@ Or add to your MCP client config:
 }
 ```
 
-Hermes Agent `config.yaml`:
+ Agent `config.yaml`:
 
 ```yaml
 mcp_servers:
