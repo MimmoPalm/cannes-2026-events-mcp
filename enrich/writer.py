@@ -1,10 +1,11 @@
-"""Write enriched data to the MIMMS master Google Sheet."""
+"""Write enriched data to the MIMMS master Google Sheet.
 
-import csv
-import io
+Uses Google Sheets API v4 and Drive API v3 directly via the bot account
+token at ~/.config/gdrive_token.pickle (has drive scope).
+"""
+
 import json
-import re
-import subprocess
+import pickle
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,54 +33,109 @@ def _save_config(config: dict):
     CONFIG_PATH.write_text(json.dumps(config, indent=2))
 
 
-def _run_gws(args: list[str]) -> str:
-    """Run a gws CLI command and return stdout."""
-    result = subprocess.run(
-        ["gws"] + args,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"gws command failed: {result.stderr}")
-    return result.stdout.strip()
+def _get_credentials():
+    """Load bot account credentials from pickle file."""
+    token_path = Path.home() / ".config" / "gdrive_token.pickle"
+    if not token_path.exists():
+        raise FileNotFoundError(f"Bot account token not found at {token_path}")
+    with open(token_path, "rb") as f:
+        return pickle.load(f)
+
+
+def _get_sheets_service():
+    from googleapiclient.discovery import build
+    return build("sheets", "v4", credentials=_get_credentials())
+
+
+def _get_drive_service():
+    from googleapiclient.discovery import build
+    return build("drive", "v3", credentials=_get_credentials())
 
 
 def _create_master_sheet() -> str:
-    """Create a new Google Sheet and return its ID."""
-    title = "Cannes Lions 2026 - Master (MIMMS)"
-    output = _run_gws(["sheets", "create", title])
-    sheet_id = output.strip()
-    if "spreadsheets/d/" in sheet_id:
-        sheet_id = sheet_id.split("spreadsheets/d/")[1].split("/")[0]
-    return sheet_id
+    """Create a new Google Sheet with 3 tabs and return its ID."""
+    service = _get_sheets_service()
+    body = {
+        "properties": {"title": "Cannes Lions 2026 - Master (MIMMS)"},
+        "sheets": [
+            {"properties": {"title": "Events", "index": 0}},
+            {"properties": {"title": "Unmatched Registrations", "index": 1}},
+            {"properties": {"title": "_metadata", "index": 2}},
+        ],
+    }
+    result = service.spreadsheets().create(body=body).execute()
+    return result["spreadsheetId"]
 
 
 def _make_sheet_public(sheet_id: str):
     """Make the sheet viewable by anyone with the link."""
     try:
-        _run_gws(["drive", "share", sheet_id, "--type", "anyone", "--role", "reader"])
+        drive = _get_drive_service()
+        drive.permissions().create(
+            fileId=sheet_id,
+            body={"type": "anyone", "role": "reader"},
+        ).execute()
     except Exception as e:
         print(f"  Warning: could not make sheet public: {e}")
 
 
 def _get_tab_gids(sheet_id: str) -> dict[str, str]:
-    """Retrieve GIDs for all tabs in a sheet using gws CLI."""
-    try:
-        output = _run_gws(["sheets", "info", sheet_id])
-        gids = {}
-        for line in output.splitlines():
-            line = line.strip()
-            if "gid" in line.lower():
-                match = re.search(r"(.+?)\s*\(?gid[:\s]*(\d+)", line, re.IGNORECASE)
-                if match:
-                    tab_name = match.group(1).strip().lower()
-                    gid = match.group(2)
-                    gids[tab_name] = gid
-        return gids
-    except Exception as e:
-        print(f"  Warning: could not retrieve tab GIDs: {e}")
-        return {}
+    """Retrieve GIDs for all tabs in a sheet."""
+    service = _get_sheets_service()
+    result = service.spreadsheets().get(
+        spreadsheetId=sheet_id,
+        fields="sheets.properties",
+    ).execute()
+    gids = {}
+    for sheet in result.get("sheets", []):
+        props = sheet.get("properties", {})
+        title = props.get("title", "").lower()
+        gid = str(props.get("sheetId", ""))
+        gids[title] = gid
+    return gids
+
+
+def _ensure_tabs_exist(sheet_id: str, tab_names: list[str]):
+    """Ensure all required tabs exist in the sheet."""
+    service = _get_sheets_service()
+    result = service.spreadsheets().get(
+        spreadsheetId=sheet_id,
+        fields="sheets.properties.title",
+    ).execute()
+    existing = {s["properties"]["title"] for s in result.get("sheets", [])}
+
+    requests = []
+    for name in tab_names:
+        if name not in existing:
+            requests.append({"addSheet": {"properties": {"title": name}}})
+
+    if requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body={"requests": requests},
+        ).execute()
+
+
+def _write_tab(sheet_id: str, tab_name: str, headers: list[str], rows: list[list[str]]):
+    """Clear a tab and write headers + rows."""
+    service = _get_sheets_service()
+
+    # Clear existing data
+    range_name = f"'{tab_name}'!A:Z"
+    service.spreadsheets().values().clear(
+        spreadsheetId=sheet_id,
+        range=range_name,
+        body={},
+    ).execute()
+
+    # Write new data
+    values = [headers] + rows
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id,
+        range=f"'{tab_name}'!A1",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
 
 
 def _event_to_row(event: Event) -> list[str]:
@@ -102,15 +158,6 @@ def _event_to_row(event: Event) -> list[str]:
         event.registration_notes,
         event.status,
     ]
-
-
-def _to_csv_string(headers: list[str], rows: list[list[str]]) -> str:
-    """Convert headers and rows to a CSV string."""
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(headers)
-    writer.writerows(rows)
-    return output.getvalue()
 
 
 def write_master_sheet(
@@ -136,14 +183,14 @@ def write_master_sheet(
         _save_config(config)
         _make_sheet_public(sheet_id)
         print(f"  Created: https://docs.google.com/spreadsheets/d/{sheet_id}")
+    else:
+        # Ensure tabs exist on re-runs
+        _ensure_tabs_exist(sheet_id, ["Events", "Unmatched Registrations", "_metadata"])
 
     # Write Events tab
     print("Writing Events tab...")
     event_rows = [_event_to_row(e) for e in events]
-    events_csv = _to_csv_string(EVENT_HEADERS, event_rows)
-    csv_path = Path("/tmp/cannes_events.csv")
-    csv_path.write_text(events_csv)
-    _run_gws(["sheets", "import", sheet_id, str(csv_path), "--sheet", "Events", "--replace"])
+    _write_tab(sheet_id, "Events", EVENT_HEADERS, event_rows)
 
     # Write Unmatched Registrations tab
     print("Writing Unmatched Registrations tab...")
@@ -157,28 +204,20 @@ def write_master_sheet(
         ]
         for r in unmatched_regs
     ]
-    unreg_csv = _to_csv_string(UNREG_HEADERS, unreg_rows)
-    csv_path2 = Path("/tmp/cannes_unreg.csv")
-    csv_path2.write_text(unreg_csv)
-    _run_gws(["sheets", "import", sheet_id, str(csv_path2), "--sheet", "Unmatched Registrations", "--replace"])
+    _write_tab(sheet_id, "Unmatched Registrations", UNREG_HEADERS, unreg_rows)
 
     # Write _metadata tab
     print("Writing _metadata tab...")
     now = datetime.now(timezone.utc).isoformat()
-    meta_csv = _to_csv_string(
-        ["key", "value"],
-        [
-            ["last_updated", now],
-            ["schedule_sheet_id", "1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE"],
-            ["registration_sheet_id", "1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8"],
-            ["event_count", str(len(events))],
-            ["unmatched_reg_count", str(len(unmatched_regs))],
-            *[["warning", w] for w in warnings],
-        ],
-    )
-    csv_path3 = Path("/tmp/cannes_meta.csv")
-    csv_path3.write_text(meta_csv)
-    _run_gws(["sheets", "import", sheet_id, str(csv_path3), "--sheet", "_metadata", "--replace"])
+    meta_rows = [
+        ["last_updated", now],
+        ["schedule_sheet_id", "1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE"],
+        ["registration_sheet_id", "1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8"],
+        ["event_count", str(len(events))],
+        ["unmatched_reg_count", str(len(unmatched_regs))],
+        *[["warning", w] for w in warnings],
+    ]
+    _write_tab(sheet_id, "_metadata", ["key", "value"], meta_rows)
 
     # Retrieve tab GIDs
     print("Retrieving tab GIDs...")
@@ -191,12 +230,8 @@ def write_master_sheet(
         print(f"  Events GID: {config['events_gid']}")
         print(f"  Unmatched Registrations GID: {config['unreg_gid']}")
     else:
-        print("  Warning: could not auto-detect tab GIDs. Check config.json manually.")
-        print(f"  Open https://docs.google.com/spreadsheets/d/{sheet_id} and note the gid= parameter for each tab.")
-        warnings.append("Tab GIDs not auto-detected. Set events_gid and unreg_gid in config.json manually.")
-
-    # Clean up temp files
-    for p in [csv_path, csv_path2, csv_path3]:
-        p.unlink(missing_ok=True)
+        print("  Warning: could not auto-detect tab GIDs.")
+        print(f"  Open https://docs.google.com/spreadsheets/d/{sheet_id}")
+        warnings.append("Tab GIDs not auto-detected.")
 
     return config
