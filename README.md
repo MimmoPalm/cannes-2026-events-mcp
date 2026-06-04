@@ -1,13 +1,24 @@
 # Cannes Lions 2026 MCP Events  
 
-MCP server that lets AI agents query Cannes Lions 2026 event schedules and registration links.
+MCP server that lets AI agents query the Cannes Lions 2026 event schedule and registration links.
+
+Built by [MIMMS](https://mimms.tech).
+
+## Credits
+
+The underlying data is curated and maintained by two incredible community efforts:
+
+- **Event schedule** — [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes) and **Emily Palmer**, who built and maintain the A-Z of Cannes beaches, apartments, and week-long activations
+- **Registration links** — a community-sourced sheet of event registration URLs, kept current by contributors across the industry
+
+Both sheets are published to web (no auth required). This MCP server simply wraps them for AI agent access.
 
 ## Data Sources
 
-1. **Event Schedule** — Full timetable curated by [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes), including the A-Z of beaches, apartments, and week-long activations
-2. **Registration Links** — Community-sourced sheet of event registration URLs
-
-Both are published Google Sheets — no auth required.
+| Sheet | Source | Curation |
+|---|---|---|
+| [Full Schedule](https://docs.google.com/spreadsheets/d/1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE) | The Digital Voice x Emily Palmer | Events, times, locations, hosts, details |
+| [Registration Links](https://docs.google.com/spreadsheets/d/1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8) | Community-sourced | Company name + registration URL |
 
 ## Tools
 
