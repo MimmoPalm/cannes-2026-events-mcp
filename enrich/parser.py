@@ -74,47 +74,13 @@ def _detect_day(first_cell: str) -> str | None:
     return None
 
 
-def _split_mega_row(rows: list[list[str]]) -> tuple[list[list[str]], dict[int, list[int]]]:
-    if len(rows) < 2:
-        return rows, {i: [i] for i in range(len(rows))}
-    first_data = rows[1]
-    has_newlines = any("\n" in cell for cell in first_data)
-    if not has_newlines:
-        return rows, {i: [i] for i in range(len(rows))}
-    split_cols = [cell.split("\n") for cell in first_data]
-    col_lengths = [len(col) for col in split_cols]
-    max_items = max(col_lengths)
-    if len(set(col_lengths)) > 1:
-        print(f"  Warning: mega-row column lengths differ: {col_lengths}. Padding shorter columns.")
-    for col in split_cols:
-        while len(col) < max_items:
-            col.append("")
-    new_rows = [rows[0]]
-    index_map: dict[int, list[int]] = {0: [0]}
-    mega_new_indices = []
-    for i in range(max_items):
-        new_row = [col[i].strip() for col in split_cols]
-        if any(cell for cell in new_row):
-            mega_new_indices.append(len(new_rows))
-            new_rows.append(new_row)
-    index_map[1] = mega_new_indices
-    for old_idx in range(2, len(rows)):
-        new_idx = len(new_rows)
-        index_map[old_idx] = [new_idx]
-        new_rows.append(rows[old_idx])
-    return new_rows, index_map
+SKIP_ROWS = {"event", "the a - z of beaches / apartments / week long activations"}
 
 
-def _remap_hyperlinks(
-    hyperlinks: dict[int, str],
-    index_map: dict[int, list[int]],
-) -> dict[int, str]:
-    remapped = {}
-    for raw_idx, url in hyperlinks.items():
-        new_indices = index_map.get(raw_idx, [])
-        if new_indices:
-            remapped[new_indices[0]] = url
-    return remapped
+def _is_skip_row(first_cell: str) -> bool:
+    """Check if row is a section header or attribution to skip."""
+    stripped = first_cell.strip().lower()
+    return stripped in SKIP_ROWS or stripped.startswith("produced by")
 
 
 def _derive_status(time_str: str, location: str) -> str:
@@ -130,17 +96,20 @@ def parse_schedule_rows(
     rows: list[list[str]],
     hyperlinks: dict[int, str],
 ) -> list[Event]:
-    rows, index_map = _split_mega_row(rows)
-    remapped_links = _remap_hyperlinks(hyperlinks, index_map)
+    """Parse schedule rows from the Sheets API.
+
+    Row indices in `rows` and `hyperlinks` are aligned (both from the API).
+    No mega-row splitting needed since the API returns one row per event.
+    """
     events = []
     current_day = ""
     current_date = ""
     for row_idx, row in enumerate(rows):
-        if row_idx == 0:
-            continue
         if not any(cell.strip() for cell in row):
             continue
         first_cell = row[0].strip() if row else ""
+        if _is_skip_row(first_cell):
+            continue
         detected_day = _detect_day(first_cell)
         if detected_day:
             current_day = detected_day
@@ -152,7 +121,7 @@ def parse_schedule_rows(
         start, end = parse_time(time_raw)
         location = col(3)
         link_text = col(4)
-        event_url = remapped_links.get(row_idx, "")
+        event_url = hyperlinks.get(row_idx, "")
         if not event_url and link_text.startswith("http"):
             event_url = link_text
         event = Event(

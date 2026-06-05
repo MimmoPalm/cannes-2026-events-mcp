@@ -10,7 +10,7 @@ Usage:
 
 import argparse
 
-from enrich.sheets_reader import read_schedule_csv, read_registration_csv, extract_hyperlinks
+from enrich.sheets_reader import read_schedule_rows, read_registration_csv, extract_hyperlinks
 from enrich.parser import parse_schedule_rows
 from enrich.crawler import crawl_urls_sync
 from enrich.classifier import classify_events
@@ -29,7 +29,7 @@ def main():
 
     # Step 1: Read source sheets
     print("Step 1: Reading source sheets...")
-    schedule_rows = read_schedule_csv()
+    schedule_rows = read_schedule_rows()
     print(f"  Schedule: {len(schedule_rows)} raw rows")
 
     registrations_raw = read_registration_csv()
@@ -100,6 +100,14 @@ def main():
         print(f"  Classified {classified_count}/{len(events)} events with specific types")
     else:
         print("\nStep 4: Skipping classification (--no-classify)")
+
+    # Step 4b: Set registration_url from event_url (schedule sheet "HERE" links)
+    prefilled = 0
+    for e in events:
+        if e.event_url and not e.registration_url:
+            e.registration_url = e.event_url
+            prefilled += 1
+    print(f"  Pre-filled {prefilled}/{len(events)} registration URLs from schedule sheet links")
 
     # Step 5: Match registrations
     print("\nStep 5: Matching registrations...")

@@ -10,19 +10,36 @@ import httpx
 
 SCHEDULE_SHEET_ID = "1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE"
 SCHEDULE_GID = "1111568312"
+SCHEDULE_TAB_NAME = "The Digital Voice\u2122: 2026 Event Guide"
 REGISTRATION_SHEET_ID = "1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8"
 REGISTRATION_GID = "835495045"
 
 CSV_TEMPLATE = "https://docs.google.com/spreadsheets/d/{id}/gviz/tq?tqx=out:csv&gid={gid}"
 
 
-def read_schedule_csv() -> list[list[str]]:
-    """Fetch schedule sheet as CSV, return list of rows (each row is list of strings)."""
-    url = CSV_TEMPLATE.format(id=SCHEDULE_SHEET_ID, gid=SCHEDULE_GID)
-    resp = httpx.get(url, timeout=30)
-    resp.raise_for_status()
-    reader = csv.reader(io.StringIO(resp.text))
-    return list(reader)
+def read_schedule_rows() -> list[list[str]]:
+    """Fetch schedule sheet via Sheets API, return list of rows (each row is list of strings).
+
+    Uses the Sheets API instead of CSV export because the CSV export merges
+    the 'all week' venues section into a single mega-row, losing ~80 events.
+    """
+    from googleapiclient.discovery import build
+
+    creds = _get_sheets_credentials()
+    service = build("sheets", "v4", credentials=creds)
+    tab = f"'{SCHEDULE_TAB_NAME}'"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SCHEDULE_SHEET_ID,
+        range=f"{tab}!A1:F500",
+    ).execute()
+
+    rows = result.get("values", [])
+    # Pad short rows to 6 columns
+    for i, row in enumerate(rows):
+        while len(row) < 6:
+            row.append("")
+    return rows
 
 
 def read_registration_csv() -> list[dict[str, str]]:
@@ -72,9 +89,10 @@ def extract_hyperlinks() -> dict[int, str]:
     creds = _get_sheets_credentials()
     service = build("sheets", "v4", credentials=creds)
 
+    tab = f"'{SCHEDULE_TAB_NAME}'"
     result = service.spreadsheets().get(
         spreadsheetId=SCHEDULE_SHEET_ID,
-        ranges=["A:F"],
+        ranges=[f"{tab}!A:F"],
         fields="sheets.data.rowData.values.hyperlink",
     ).execute()
 

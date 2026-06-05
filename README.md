@@ -1,68 +1,78 @@
-# Cannes Lions 2026 MCP Events  
+# Cannes Lions 2026 MCP
 
-MCP server that lets AI agents query the Cannes Lions 2026 event schedule and registration links.
+Add the full Cannes Lions 2026 event schedule to ChatGPT, Claude, or any MCP-compatible AI agent. 259 events, enriched with classifications, speaker details, registration links, and crawled summaries.
+
+**MCP endpoint:** `https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp`
 
 Built by [MIMMS](https://mimms.tech).
 
+## What you can do
+
+Ask your AI agent natural questions about Cannes Lions 2026:
+
+- "What should a publisher do on Tuesday?"
+- "Find all happy hours on Wednesday"
+- "What's Equativ doing at Cannes?"
+- "Who's speaking at the Adelaide event?"
+- "Show me all adtech networking events"
+- "What panels are relevant for agencies this week?"
+- "Get me the registration link for the Microsoft Beach House"
+- "What invite-only events are happening on Thursday?"
+
+## Setup
+
+### ChatGPT
+Settings > Tools & integrations > Add MCP tool > paste the endpoint URL.
+
+### Claude Desktop
+Settings > MCP Servers > Add remote server > paste the endpoint URL.
+
+### Claude Code (CLI)
+```bash
+claude mcp add cannes-lions --transport http https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp
+```
+
+### Cursor / Windsurf
+Add to your `.cursor/mcp.json` or project MCP settings:
+```json
+{ "cannes-lions": { "url": "https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp" } }
+```
+
+### Any MCP client
+Point your client at the endpoint URL using StreamableHTTP transport. The server is stateless, no session persistence required.
+
+## 8 tools
+
+| Tool | What it does |
+|---|---|
+| `search_schedule` | Keyword search across event names, hosts, locations, details, and summaries |
+| `list_schedule_by_day` | All events for a specific day (Sunday through Friday), sorted by time |
+| `list_schedule_by_host` | Every event from a specific company |
+| `recommend_events` | Personalized recommendations by role: publisher, brand, agency, adtech, senior leader |
+| `filter_events` | Multi-criteria filter combining audience, company type, event type, and day |
+| `get_event_details` | Full details for a specific event with fuzzy name matching |
+| `find_registration` | Registration links and notes for a specific company |
+| `list_registrations` | All known registration links across events and unmatched entries |
+
+## Data
+
+259 events across 6 days (Sunday 21 June -- Friday 26 June) plus 61 all-week venues.
+
+Each event includes:
+- **Event name, host, day, date, time, location**
+- **Company type** -- adtech, publisher, agency, brand, platform, media, industry body
+- **Event type** -- party, panel, breakfast, happy hour, networking, workshop, all-week venue, session
+- **Target audience** -- publishers, brands, agencies, adtech, senior leaders, women in media
+- **Registration URL** -- direct link extracted from the schedule sheet
+- **Crawled summary** -- 2-3 sentence description from the event's registration page
+- **Speakers** -- name, company, and title where available
+
+### How the data is enriched
+
+The raw schedule is maintained by The Digital Voice and Emily Palmer. An enrichment pipeline reads the source sheets via the Google Sheets API, extracts registration hyperlinks, crawls each event page for context, classifies events by company type, event type, and target audience, and writes everything to a clean master sheet. The MCP server reads the master sheet live on each request.
+
 ## Credits
 
-The underlying data is curated and maintained by two incredible community efforts:
-
-- **Event schedule** — [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes) and **Emily Palmer**, who built and maintain the A-Z of Cannes beaches, apartments, and week-long activations
-- **Registration links** — a community-sourced sheet of event registration URLs, kept current by contributors across the industry
-
-Both sheets are published to web (no auth required). This MCP server simply wraps them for AI agent access.
-
-## Data Sources
-
-| Sheet | Source | Curation |
-|---|---|---|
-| [Full Schedule](https://docs.google.com/spreadsheets/d/1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE) | The Digital Voice | Events, times, locations, hosts, details |
-| [Registration Links](https://docs.google.com/spreadsheets/d/1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8) | Created by Emily Palmer and it's Community-sourced | Company name + registration URL |
-
-## Tools
-
-| Tool | Description |
-|---|---|
-| `search_schedule` | Search events by keyword (name, host, location, details) |
-| `list_schedule_by_day` | Filter events by day (sunday/monday/tuesday/etc.) |
-| `list_schedule_by_host` | Find all events from a specific company |
-| `search_registrations` | Search registration links by company name |
-| `list_registrations` | List all known registration links |
-
-## Usage
-
-Run directly via `uvx`:
-
-```bash
-uvx --from git+https://github.com/MimmoPalm/cannes-lions-mcp.git cannes-lions-mcp
-```
-
-Or add to your MCP client config:
-
-```json
-{
-  "mcpServers": {
-    "cannes-lions": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/MimmoPalm/cannes-lions-mcp.git", "cannes-lions-mcp"]
-    }
-  }
-}
-```
-
- Agent `config.yaml`:
-
-```yaml
-mcp_servers:
-  cannes-lions:
-    command: "uvx"
-    args: ["--from", "git+https://github.com/MimmoPalm/cannes-lions-mcp.git", "cannes-lions-mcp"]
-```
-
-## Example Queries
-
-- "What events is Equativ hosting at Cannes?"
-- "Find all Monday sessions"
-- "Where is the Microsoft Beach House?"
-- "Show me the TikTok registration link"
+- **Event schedule** -- [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes) and **Emily Palmer**
+- **Registration links** -- community-sourced, maintained by Emily Palmer and contributors across the industry
+- **Enrichment and MCP server** -- [MIMMS](https://mimms.tech)
