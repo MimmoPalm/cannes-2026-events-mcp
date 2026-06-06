@@ -1,10 +1,7 @@
-"""Cannes Lions 2026 MCP Server.
+"""Cannes Lions 2026 MCP Server — Enriched Edition.
 
-Exposes two datasources:
-1. Event schedule (The Digital Voice) — full timetable
-2. Registration links (community-sourced) — company + URL
-
-Both sheets are published to web (no auth needed).
+Reads from the enriched MIMMS Cannes schedule sheet with company types,
+event types, target audiences, speaker details, and registration URLs.
 """
 
 import csv
@@ -19,8 +16,8 @@ from mcp.types import Tool, TextContent
 
 # ── Sheet config ──────────────────────────────────────────────────────────
 
-SCHEDULE_SHEET_ID = "1vcWuAhU3PFakp0nhnnp0YLXRudbSJ1uTaJbIkdZN0DE"
-SCHEDULE_GID = "1111568312"
+SCHEDULE_SHEET_ID = "1f1zyz9m-AL6f_JUlE606sV2UbuRsrijfMxNwfpOMRoo"
+SCHEDULE_GID = "1460350760"
 
 REGISTRATION_SHEET_ID = "1VIVb0VFxXMQCKSJLgU-oMehyE58Tt5T0IB--g5Do4A8"
 REGISTRATION_GID = "835495045"
@@ -31,9 +28,7 @@ CSV_TEMPLATE = (
 
 # ── Data loading ───────────────────────────────────────────────────────────
 
-
 def _fetch_csv(sheet_id: str, gid: str) -> list[dict[str, str]]:
-    """Fetch a published Google Sheet as CSV and parse into list of dicts."""
     url = CSV_TEMPLATE.format(id=sheet_id, gid=gid)
     resp = httpx.get(url, timeout=30)
     resp.raise_for_status()
@@ -57,24 +52,16 @@ def _fetch_csv(sheet_id: str, gid: str) -> list[dict[str, str]]:
     return data
 
 
-def _fetch_schedule_raw() -> list[list[str]]:
-    """Fetch schedule sheet and return rows as list of lists (header + data).
+def _fetch_schedule() -> list[dict[str, str]]:
+    """Fetch the enriched schedule sheet and return list of event dicts."""
+    return _fetch_csv(SCHEDULE_SHEET_ID, SCHEDULE_GID)
 
-    Returns rows where index-based access is used (column names are unwieldy).
-    Indices:
-      0 = Event name
-      1 = Host
-      2 = Local Time (CEST)
-      3 = Location
-      4 = Link
-      5 = Details
-    """
-    url = CSV_TEMPLATE.format(id=SCHEDULE_SHEET_ID, gid=SCHEDULE_GID)
-    resp = httpx.get(url, timeout=30)
-    resp.raise_for_status()
 
-    reader = csv.reader(io.StringIO(resp.text))
-    return list(reader)
+# ── Column access helpers ─────────────────────────────────────────────────
+
+def _s(e: dict[str, str], key: str) -> str:
+    """Safe dict access."""
+    return e.get(key, "").strip()
 
 
 # ── MCP server ─────────────────────────────────────────────────────────────
@@ -87,7 +74,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="search_schedule",
-            description="Search the Cannes Lions 2026 event schedule by keyword. Matches across event name, host, location, and details.",
+            description="Search the Cannes Lions 2026 event schedule by keyword. Matches across event name, host, location, details, and crawled summaries.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -107,7 +94,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "day": {
                         "type": "string",
-                        "description": "Day keyword: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'",
+                        "description": "Day keyword: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'",
                     }
                 },
                 "required": ["day"],
@@ -125,6 +112,64 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["host"],
+            },
+        ),
+        Tool(
+            name="recommend_events",
+            description="Get personalised event recommendations by role. Filters by target audience and returns the most relevant events.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Your role: 'publisher', 'brand', 'agency', 'adtech', 'senior_leader'",
+                    },
+                    "day": {
+                        "type": "string",
+                        "description": "Optional: filter to a specific day (e.g. 'tuesday')",
+                    },
+                },
+                "required": ["role"],
+            },
+        ),
+        Tool(
+            name="filter_events",
+            description="Multi-criteria filter across the Cannes schedule. Combine audience, company type, event type, and day.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "company_type": {
+                        "type": "string",
+                        "description": "Filter by company type: 'adtech', 'publisher', 'agency', 'brand', 'platform', 'media', 'industry_body'",
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Filter by event type: 'party', 'panel', 'breakfast', 'happy_hour', 'networking', 'workshop', 'all_week_venue', 'session'",
+                    },
+                    "target_audience": {
+                        "type": "string",
+                        "description": "Filter by target audience keyword (e.g. 'publishers', 'brands', 'agencies', 'senior_leaders', 'women_in_media')",
+                    },
+                    "day": {
+                        "type": "string",
+                        "description": "Optional: filter to a specific day",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_event_details",
+            description="Get full details for a specific event by name (fuzzy match). Includes summary, speakers, registration info.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Event name or partial name to look up",
+                    }
+                },
+                "required": ["name"],
             },
         ),
         Tool(
@@ -161,6 +206,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return _list_by_day(arguments["day"])
     elif name == "list_schedule_by_host":
         return _list_by_host(arguments["host"])
+    elif name == "recommend_events":
+        return _recommend_events(arguments["role"], arguments.get("day", ""))
+    elif name == "filter_events":
+        return _filter_events(arguments)
+    elif name == "get_event_details":
+        return _get_event_details(arguments["name"])
     elif name == "search_registrations":
         return _search_registrations(arguments["company"])
     elif name == "list_registrations":
@@ -168,132 +219,200 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
-# ── Schedule helpers ───────────────────────────────────────────────────────
+# ── Output formatting ─────────────────────────────────────────────────────
 
-# Column indices for the schedule sheet (row 0 = header)
-SCHEDULE_COLS = {
-    "event": 0,
-    "host": 1,
-    "time": 2,
-    "location": 3,
-    "link": 4,
-    "details": 5,
-}
-
-
-def _format_schedule_row(row: list[str]) -> str:
-    """Format a schedule row (list by index) for output."""
+def _format_event(e: dict[str, str], include_details: bool = False) -> str:
+    """Format an event for display."""
     parts = [
-        f"**{_col(row, 'event')}**",
-        f"Host: {_col(row, 'host')}",
-        f"Time: {_col(row, 'time')}",
-        f"Location: {_col(row, 'location')}",
+        f"**{_s(e, 'event_name')}**",
+        f"Host: {_s(e, 'host')}",
     ]
-    link = _col(row, "link")
-    if link and link != "Coming soon":
-        parts.append(f"Link: {link}")
-    details = _col(row, "details")
-    if details:
-        parts.append(f"Details: {details[:300]}")
+    day = _s(e, "day")
+    date = _s(e, "date")
+    if day or date:
+        when = f"{day} {date}".strip()
+        parts.append(f"When: {when}")
+    
+    start = _s(e, "start_time")
+    end = _s(e, "end_time")
+    if start:
+        time_str = f"{start} - {end}" if end else start
+        parts.append(f"Time: {time_str}")
+
+    location = _s(e, "location")
+    if location:
+        parts.append(f"Location: {location}")
+
+    ct = _s(e, "company_type")
+    et = _s(e, "event_type")
+    if ct or et:
+        badges = " · ".join(b for b in [ct, et] if b)
+        parts.append(f"Type: {badges}")
+
+    audience = _s(e, "target_audience")
+    if audience:
+        parts.append(f"Audience: {audience}")
+
+    if include_details:
+        summary = _s(e, "crawled_summary")
+        if summary:
+            parts.append(f"Summary: {summary[:500]}")
+        
+        speakers = _s(e, "speakers")
+        if speakers:
+            parts.append(f"Speakers: {speakers}")
+
+    reg_url = _s(e, "registration_url")
+    if reg_url:
+        parts.append(f"Register: {reg_url}")
+
+    reg_notes = _s(e, "registration_notes")
+    if reg_notes:
+        parts.append(f"Registration notes: {reg_notes}")
+
     parts.append("---")
     return "\n".join(parts)
 
 
-def _col(row: list[str], key: str) -> str:
-    """Safe column access by name, returns empty string if missing."""
-    idx = SCHEDULE_COLS[key]
-    if idx < len(row):
-        return row[idx].strip()
-    return ""
-
-
-def _match_day(row: list[str], day: str) -> bool:
-    """Check if a row belongs to a given day by looking for day markers.
-
-    Rows that are day headers (like 'SUNDAY 21ST') set the current day context.
-    Event rows under that header match if the day matches.
-    """
-    text = " ".join(row).lower()
-    return day.lower() in text
-
-
 # ── Schedule tools ─────────────────────────────────────────────────────────
 
-
 def _search_schedule(query: str) -> list[TextContent]:
-    rows = _fetch_schedule_raw()
+    events = _fetch_schedule()
     q = query.lower()
     matches = []
 
-    for row in rows[1:]:  # skip header
-        if not any(cell.strip() for cell in row):
-            continue
-        text = " ".join(cell.lower() for cell in row)
+    for e in events:
+        text = " ".join(str(v).lower() for v in e.values())
         if q in text:
-            matches.append(row)
+            matches.append(e)
 
     if not matches:
         return [TextContent(type="text", text=f"No events matching '{query}'.")]
 
-    result = "\n".join(_format_schedule_row(m) for m in matches[:15])
+    result = "\n".join(_format_event(m) for m in matches[:15])
     header = f"Found {len(matches)} events matching '{query}':\n\n"
     return [TextContent(type="text", text=header + result)]
 
 
 def _list_by_day(day: str) -> list[TextContent]:
-    rows = _fetch_schedule_raw()
+    events = _fetch_schedule()
     d = day.lower()
-
-    # Find the day marker and collect all subsequent rows until next day marker
-    day_keywords = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+    
     matches = []
-    in_section = False
-
-    for row in rows[1:]:
-        if not any(cell.strip() for cell in row):
-            continue
-
-        first = row[0].lower() if row else ""
-
-        # Check if this row starts a new day section
-        is_day_header = any(dk in first for dk in day_keywords)
-        if is_day_header:
-            in_section = d in first
-            continue
-
-        if in_section:
-            matches.append(row)
+    for e in events:
+        eday = _s(e, "day").lower()
+        if d in eday or (d == "all week" and "all week" in eday):
+            matches.append(e)
+    
+    matches.sort(key=lambda e: _s(e, "start_time"))
 
     if not matches:
         return [TextContent(type="text", text=f"No events found for '{day}'.")]
 
-    result = "\n".join(_format_schedule_row(m) for m in matches[:25])
-    header = f"Events for {day.title()}:\n\n"
+    result = "\n".join(_format_event(m) for m in matches[:30])
+    header = f"Events for {day.title()}: ({len(matches)} total, showing up to 30)\n\n"
     return [TextContent(type="text", text=header + result)]
 
 
 def _list_by_host(host: str) -> list[TextContent]:
-    rows = _fetch_schedule_raw()
+    events = _fetch_schedule()
     h = host.lower()
-    matches = []
-
-    for row in rows[1:]:
-        if not any(cell.strip() for cell in row):
-            continue
-        host_val = _col(row, "host").lower()
-        if h in host_val:
-            matches.append(row)
+    matches = [e for e in events if h in _s(e, "host").lower()]
 
     if not matches:
         return [TextContent(type="text", text=f"No events found hosted by '{host}'.")]
 
-    result = "\n".join(_format_schedule_row(m) for m in matches[:15])
-    header = f"Events hosted by {host}:\n\n"
+    result = "\n".join(_format_event(m) for m in matches[:15])
+    header = f"Events hosted by {host}: ({len(matches)} total)\n\n"
+    return [TextContent(type="text", text=header + result)]
+
+
+def _recommend_events(role: str, day: str = "") -> list[TextContent]:
+    events = _fetch_schedule()
+    r = role.lower()
+
+    role_map = {
+        "publisher": "publishers",
+        "brand": "brands",
+        "agency": "agencies",
+        "adtech": "adtech",
+        "senior_leader": "senior_leaders",
+    }
+    keyword = role_map.get(r, r)
+
+    matches = []
+    for e in events:
+        audience = _s(e, "target_audience").lower()
+        if keyword in audience:
+            if day and day.lower() not in _s(e, "day").lower():
+                continue
+            matches.append(e)
+
+    matches.sort(key=lambda e: (
+        0 if _s(e, "day").lower() and "all week" not in _s(e, "day").lower() else 1,
+        _s(e, "start_time"),
+    ))
+
+    if not matches:
+        msg = f"No events found for role '{role}'"
+        if day:
+            msg += f" on {day}"
+        return [TextContent(type="text", text=msg + ".")]
+
+    result = "\n".join(_format_event(m) for m in matches[:20])
+    header = f"Recommended for {role}s"
+    if day:
+        header += f" on {day.title()}"
+    header += f": ({len(matches)} events, showing top 20)\n\n"
+    return [TextContent(type="text", text=header + result)]
+
+
+def _filter_events(args: dict) -> list[TextContent]:
+    events = _fetch_schedule()
+    matches = events
+
+    ct = args.get("company_type", "").lower()
+    if ct:
+        matches = [e for e in matches if ct in _s(e, "company_type").lower()]
+
+    et = args.get("event_type", "").lower()
+    if et:
+        matches = [e for e in matches if et in _s(e, "event_type").lower()]
+
+    audience = args.get("target_audience", "").lower()
+    if audience:
+        matches = [e for e in matches if audience in _s(e, "target_audience").lower()]
+
+    day = args.get("day", "").lower()
+    if day:
+        matches = [e for e in matches if day in _s(e, "day").lower()]
+
+    if not matches:
+        filters = ", ".join(f"{k}={v}" for k, v in args.items() if v)
+        return [TextContent(type="text", text=f"No events match filters: {filters}.")]
+
+    result = "\n".join(_format_event(m) for m in matches[:25])
+    header = f"Filtered events ({len(matches)} total, showing up to 25):\n\n"
+    return [TextContent(type="text", text=header + result)]
+
+
+def _get_event_details(name: str) -> list[TextContent]:
+    events = _fetch_schedule()
+    n = name.lower()
+
+    matches = [e for e in events if n == _s(e, "event_name").lower()]
+    if not matches:
+        matches = [e for e in events if n in _s(e, "event_name").lower()]
+
+    if not matches:
+        return [TextContent(type="text", text=f"No event found matching '{name}'.")]
+
+    result = "\n".join(_format_event(m, include_details=True) for m in matches[:5])
+    header = f"Found {len(matches)} matching events:\n\n"
     return [TextContent(type="text", text=header + result)]
 
 
 # ── Registration tools ─────────────────────────────────────────────────────
-
 
 def _search_registrations(company: str) -> list[TextContent]:
     data = _fetch_csv(REGISTRATION_SHEET_ID, REGISTRATION_GID)
@@ -333,7 +452,6 @@ def _list_registrations() -> list[TextContent]:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
-
 
 def main():
     import asyncio
