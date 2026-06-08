@@ -114,10 +114,10 @@ Each event includes:
 
 ### How the data is enriched
 
-The raw schedule is maintained by The Digital Voice and Emily Palmer. An enrichment pipeline reads the source sheets via the Google Sheets API, extracts registration hyperlinks, crawls each event page for context, classifies events by company type, event type, and target audience, and writes everything to a clean master sheet. The MCP server reads the master sheet live on each request.
+An enrichment pipeline reads the source sheets via the Google Sheets API, extracts registration hyperlinks, crawls each event page for context, classifies events by company type, event type, and target audience, and writes everything to a clean master sheet. The MCP server reads the master sheet live on each request.
 
 ## Credits
 
-- **Event schedule** -- [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes) and **Emily Palmer**
-- **Registration links** -- community-sourced, maintained by Emily Palmer and contributors across the industry
-- **Enrichment and MCP server** -- [MIMMS](https://mimms.tech)
+Huge thanks to the incredible team at [The Digital Voice](https://www.thedigitalvoice.co.uk/cannes) and **Emily Palmer** for putting together such a great curated list of Cannes Lions events. Registration links sourced and maintained by the community.
+
+Enrichment and MCP server by [MIMMS](https://mimms.tech).
