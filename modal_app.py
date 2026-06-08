@@ -297,4 +297,25 @@ def web():
             return "No registration links available."
         return f"Registration links ({len(lines)} total):\n\n" + "\n".join(lines)
 
-    return mcp.streamable_http_app()
+    # Wrap the MCP ASGI app to reject GET /mcp SSE long-poll connections.
+    # ChatGPT opens these to listen for server-initiated messages, but this
+    # server is stateless (no notifications). Without this, each GET hangs
+    # for 300s until Modal's timeout kills it, burning compute and filling
+    # logs with timeout errors.
+    inner = mcp.streamable_http_app()
+
+    async def asgi_app(scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "GET" and scope["path"] == "/mcp":
+            await send({
+                "type": "http.response.start",
+                "status": 405,
+                "headers": [[b"content-type", b"text/plain"]],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b"SSE not supported on this stateless server. Use POST.",
+            })
+            return
+        await inner(scope, receive, send)
+
+    return asgi_app
