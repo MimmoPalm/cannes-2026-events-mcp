@@ -27,6 +27,7 @@ def web():
     import time
 
     import httpx
+    from pydantic import Field
     from thefuzz import fuzz
     from mcp.server.fastmcp import FastMCP
     from mcp.server.streamable_http import TransportSecuritySettings
@@ -118,13 +119,11 @@ def web():
     )
 
     @mcp.tool()
-    def search_schedule(query: str, limit: int = 15) -> str:
-        """Search the Cannes Lions 2026 event schedule by keyword. Matches across event_name, host, location, details, crawled_summary.
-
-        Args:
-            query: Search term, e.g. 'Microsoft', 'Tennis', 'AI', 'happy hour', 'retail media'
-            limit: Max results to return (default 15)
-        """
+    def search_schedule(
+        query: str = Field(description="Search term, e.g. 'Microsoft', 'Tennis', 'AI', 'happy hour', 'retail media'"),
+        limit: int = Field(default=15, description="Max number of results to return (default 15)"),
+    ) -> str:
+        """Search the Cannes Lions 2026 event schedule by keyword. Matches across event name, host, location, details, and crawled summary."""
         events = _load_events()
         q = query.lower()
         matches = []
@@ -143,12 +142,10 @@ def web():
         return f"Found {len(matches)} events matching '{query}':\n\n{result}"
 
     @mcp.tool()
-    def list_schedule_by_day(day: str) -> str:
-        """List all Cannes events for a specific day. Returns events sorted by start time.
-
-        Args:
-            day: Day of the week. One of: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'
-        """
+    def list_schedule_by_day(
+        day: str = Field(description="Day of the week: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'"),
+    ) -> str:
+        """List all Cannes Lions 2026 events for a specific day. Returns events sorted by start time."""
         events = _load_events()
         d = day.lower().strip()
         matches = [e for e in events if e.get("day", "").lower() == d]
@@ -159,12 +156,10 @@ def web():
         return f"Events for {day.title()} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def list_schedule_by_host(host: str) -> str:
-        """Find all events hosted by a specific company at Cannes Lions 2026.
-
-        Args:
-            host: Company name, e.g. 'Microsoft', 'TikTok', 'Equativ', 'Financial Times'
-        """
+    def list_schedule_by_host(
+        host: str = Field(description="Company name, e.g. 'Microsoft', 'TikTok', 'Equativ', 'Financial Times'"),
+    ) -> str:
+        """Find all events hosted by a specific company at Cannes Lions 2026."""
         events = _load_events()
         h = host.lower()
         matches = [e for e in events if h in e.get("host", "").lower()]
@@ -174,14 +169,12 @@ def web():
         return f"Events hosted by {host} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def recommend_events(role: str, day: str = "", limit: int = 20) -> str:
-        """Recommend Cannes Lions 2026 events based on your role. Optionally filter by day.
-
-        Args:
-            role: Your industry role. One of: 'publisher', 'brand', 'agency', 'adtech', 'creator', 'senior_leader'
-            day: Optional day filter. One of: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'
-            limit: Max results to return (default 20)
-        """
+    def recommend_events(
+        role: str = Field(description="Your industry role: 'publisher', 'brand', 'agency', 'adtech', 'creator', or 'senior_leader'"),
+        day: str = Field(default="", description="Optional day filter: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'"),
+        limit: int = Field(default=20, description="Max number of results to return (default 20)"),
+    ) -> str:
+        """Recommend Cannes Lions 2026 events based on your role. Optionally filter by day."""
         events = _load_events()
         role_stem = role.lower().strip().rstrip("s")
         matches = []
@@ -201,15 +194,13 @@ def web():
         return f"{header} ({len(matches)} total, showing {len(capped)}):\n\n{result}"
 
     @mcp.tool()
-    def filter_events(audience: str = "", company_type: str = "", event_type: str = "", day: str = "") -> str:
-        """Filter Cannes Lions 2026 events by multiple criteria. All parameters are optional -- combine any.
-
-        Args:
-            audience: Target audience. One of: 'publishers', 'brands', 'agencies', 'senior_leaders', 'women_in_media', 'everyone'
-            company_type: Host company type. One of: 'adtech', 'publisher', 'agency', 'brand', 'platform', 'media', 'industry_body'
-            event_type: Event format. One of: 'party', 'panel', 'breakfast', 'happy_hour', 'networking', 'workshop', 'session', 'all_week_venue'
-            day: Day of the week. One of: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'
-        """
+    def filter_events(
+        audience: str = Field(default="", description="Target audience: 'publishers', 'brands', 'agencies', 'senior_leaders', 'women_in_media', or 'everyone'"),
+        company_type: str = Field(default="", description="Host company type: 'adtech', 'publisher', 'agency', 'brand', 'platform', 'media', or 'industry_body'"),
+        event_type: str = Field(default="", description="Event format: 'party', 'panel', 'breakfast', 'happy_hour', 'networking', 'workshop', 'session', or 'all_week_venue'"),
+        day: str = Field(default="", description="Day of the week: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'"),
+    ) -> str:
+        """Filter Cannes Lions 2026 events by multiple criteria. All parameters are optional -- combine any."""
         events = _load_events()
         matches = events
         if day:
@@ -235,12 +226,10 @@ def web():
         return f"Filtered events ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def get_event_details(event_name: str) -> str:
-        """Get full details for a specific Cannes Lions 2026 event. Uses fuzzy matching on event name.
-
-        Args:
-            event_name: Event name or partial name to look up, e.g. 'Microsoft Beach House', 'Diaspora Dinner'
-        """
+    def get_event_details(
+        event_name: str = Field(description="Event name or partial name to look up, e.g. 'Microsoft Beach House', 'Diaspora Dinner'"),
+    ) -> str:
+        """Get full details for a specific Cannes Lions 2026 event. Uses fuzzy matching on event name."""
         events = _load_events()
         if not events:
             return "No events data available."
@@ -256,12 +245,10 @@ def web():
         return _format_event(best_match)
 
     @mcp.tool()
-    def find_registration(company: str) -> str:
-        """Find registration info for a company at Cannes Lions 2026. Searches both matched events and unmatched registrations.
-
-        Args:
-            company: Company or host name, e.g. 'Microsoft', 'Seedtag', 'Adobe'
-        """
+    def find_registration(
+        company: str = Field(description="Company or host name, e.g. 'Microsoft', 'Seedtag', 'Adobe'"),
+    ) -> str:
+        """Find registration info for a company at Cannes Lions 2026. Searches both matched events and unmatched registrations."""
         events = _load_events()
         c = company.lower()
         event_matches = []
