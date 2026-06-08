@@ -22,23 +22,68 @@ Ask your AI agent natural questions about Cannes Lions 2026:
 ## Setup
 
 ### ChatGPT
-Settings > Tools & integrations > Add MCP tool > paste the endpoint URL.
+
+1. Copy the MCP endpoint URL above.
+2. Open ChatGPT and go to **Settings > Tools & Integrations > Add MCP Tool**.
+3. Paste the endpoint URL into the URL field.
+4. Click **Add** or **Connect**.
+5. If prompted, complete the authentication flow.
+6. The MCP tool will appear in your available tools list. Open a new chat to verify.
 
 ### Claude Desktop
-Settings > MCP Servers > Add remote server > paste the endpoint URL.
+
+**Option 1: Add through the UI**
+
+1. Open Claude Desktop.
+2. Go to **Settings > MCP Servers**.
+3. Click **Add Remote Server**.
+4. Paste the endpoint URL.
+5. Complete authentication if prompted.
+6. Save the server.
+
+**Option 2: Configure manually**
+
+1. Add the server to your `claude_desktop_config.json` file under the `mcpServers` section, using the endpoint URL above.
+2. Restart Claude Desktop after saving the configuration.
 
 ### Claude Code (CLI)
+
 ```bash
 claude mcp add cannes-lions --transport http https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp
 ```
 
+### Hermes (Self-Hosted)
+
+Hermes MCP servers are configured through the Hermes configuration file rather than a graphical interface.
+
+1. Open the Hermes configuration file at `/opt/data/config.yaml`.
+2. Locate the `tools` section.
+3. Add or configure the MCP-enabled tool according to the Hermes documentation for your version.
+4. Provide any required configuration values, such as API keys, server packages, or connection settings.
+5. Save the configuration and restart Hermes.
+
+Example:
+
+```yaml
+tools:
+  web_search:
+    enabled: true
+    provider: tavily
+    api_key: tvly-...
+```
+
+> The exact configuration structure varies between Hermes releases. Refer to the Hermes documentation for the MCP server configuration format supported by your version.
+
 ### Cursor / Windsurf
+
 Add to your `.cursor/mcp.json` or project MCP settings:
+
 ```json
 { "cannes-lions": { "url": "https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp" } }
 ```
 
 ### Any MCP client
+
 Point your client at the endpoint URL using StreamableHTTP transport. The server is stateless, no session persistence required.
 
 ## 8 tools
