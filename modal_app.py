@@ -1,4 +1,6 @@
-"""Cannes Lions 2026 -- StreamableHTTP MCP server on Modal (v2: enriched data)."""
+"""Cannes Lions 2026 -- StreamableHTTP MCP server on Modal (v3: enriched data, explicit schemas)."""
+
+from __future__ import annotations
 
 import modal
 
@@ -22,6 +24,7 @@ def web():
     import csv
     import io
     import os
+    import time
 
     import httpx
     from thefuzz import fuzz
@@ -34,7 +37,17 @@ def web():
     UNREG_GID = os.environ.get("UNREG_GID", "")
     CSV_TEMPLATE = "https://docs.google.com/spreadsheets/d/{id}/gviz/tq?tqx=out:csv&gid={gid}"
 
+    # ── TTL cache (5 min) to avoid hammering Google Sheets ─────────────
+    _cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
+    CACHE_TTL = 300  # seconds
+
     def _fetch_csv(sheet_id: str, gid: str) -> list[dict[str, str]]:
+        cache_key = f"{sheet_id}:{gid}"
+        now = time.monotonic()
+        cached = _cache.get(cache_key)
+        if cached and (now - cached[0]) < CACHE_TTL:
+            return cached[1]
+
         url = CSV_TEMPLATE.format(id=sheet_id, gid=gid)
         resp = httpx.get(url, timeout=30)
         resp.raise_for_status()
@@ -51,6 +64,7 @@ def web():
             for i, h in enumerate(headers):
                 record[h] = row[i].strip() if i < len(row) else ""
             data.append(record)
+        _cache[cache_key] = (now, data)
         return data
 
     def _load_events() -> list[dict[str, str]]:
@@ -103,8 +117,14 @@ def web():
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
+    from typing import Annotated
+    from pydantic import Field
+
     @mcp.tool()
-    def search_schedule(query: str, limit: int = 15) -> str:
+    def search_schedule(
+        query: Annotated[str, Field(description="Search term, e.g. 'Microsoft', 'Tennis', 'AI', 'happy hour'")],
+        limit: Annotated[int, Field(default=15, description="Max results to return (default 15)")] = 15,
+    ) -> str:
         """Search the Cannes Lions 2026 event schedule by keyword. Matches across event_name, host, location, details, crawled_summary."""
         events = _load_events()
         q = query.lower()
@@ -124,8 +144,10 @@ def web():
         return f"Found {len(matches)} events matching '{query}':\n\n{result}"
 
     @mcp.tool()
-    def list_schedule_by_day(day: str) -> str:
-        """List all Cannes events for a specific day (sunday/monday/tuesday/wednesday/thursday/friday). Returns events sorted by start time."""
+    def list_schedule_by_day(
+        day: Annotated[str, Field(description="Day of the week: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'")],
+    ) -> str:
+        """List all Cannes events for a specific day. Returns events sorted by start time."""
         events = _load_events()
         d = day.lower().strip()
         matches = [e for e in events if e.get("day", "").lower() == d]
@@ -136,7 +158,9 @@ def web():
         return f"Events for {day.title()} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def list_schedule_by_host(host: str) -> str:
+    def list_schedule_by_host(
+        host: Annotated[str, Field(description="Company name, e.g. 'Microsoft', 'TikTok', 'Equativ', 'Financial Times'")],
+    ) -> str:
         """Find all events hosted by a specific company at Cannes Lions 2026."""
         events = _load_events()
         h = host.lower()
@@ -147,8 +171,12 @@ def web():
         return f"Events hosted by {host} ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def recommend_events(role: str, day: str = "", limit: int = 20) -> str:
-        """Recommend Cannes Lions 2026 events based on your role (publisher, brand, agency, adtech, creator, senior_leader). Optionally filter by day."""
+    def recommend_events(
+        role: Annotated[str, Field(description="Your industry role: 'publisher', 'brand', 'agency', 'adtech', 'creator', or 'senior_leader'")],
+        day: Annotated[str, Field(default="", description="Optional day filter: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'")] = "",
+        limit: Annotated[int, Field(default=20, description="Max results to return (default 20)")] = 20,
+    ) -> str:
+        """Recommend Cannes Lions 2026 events based on your role. Optionally filter by day."""
         events = _load_events()
         role_stem = role.lower().strip().rstrip("s")
         matches = []
@@ -168,8 +196,13 @@ def web():
         return f"{header} ({len(matches)} total, showing {len(capped)}):\n\n{result}"
 
     @mcp.tool()
-    def filter_events(audience: str = "", company_type: str = "", event_type: str = "", day: str = "") -> str:
-        """Filter Cannes Lions 2026 events by multiple criteria. All parameters optional, combine any. Example: audience=publishers, event_type=happy_hour, day=wednesday."""
+    def filter_events(
+        audience: Annotated[str, Field(default="", description="Target audience: 'publishers', 'brands', 'agencies', 'senior_leaders', 'women_in_media', or 'everyone'")] = "",
+        company_type: Annotated[str, Field(default="", description="Host company type: 'adtech', 'publisher', 'agency', 'brand', 'platform', 'media', or 'industry_body'")] = "",
+        event_type: Annotated[str, Field(default="", description="Event format: 'party', 'panel', 'breakfast', 'happy_hour', 'networking', 'workshop', 'session', or 'all_week_venue'")] = "",
+        day: Annotated[str, Field(default="", description="Day of the week: 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', or 'friday'")] = "",
+    ) -> str:
+        """Filter Cannes Lions 2026 events by multiple criteria. All parameters are optional -- combine any."""
         events = _load_events()
         matches = events
         if day:
@@ -195,7 +228,9 @@ def web():
         return f"Filtered events ({len(matches)} total):\n\n{result}"
 
     @mcp.tool()
-    def get_event_details(event_name: str) -> str:
+    def get_event_details(
+        event_name: Annotated[str, Field(description="Event name or partial name to look up, e.g. 'Microsoft Beach House', 'Diaspora Dinner'")],
+    ) -> str:
         """Get full details for a specific Cannes Lions 2026 event. Uses fuzzy matching on event name."""
         events = _load_events()
         if not events:
@@ -212,7 +247,9 @@ def web():
         return _format_event(best_match)
 
     @mcp.tool()
-    def find_registration(company: str) -> str:
+    def find_registration(
+        company: Annotated[str, Field(description="Company or host name, e.g. 'Microsoft', 'Seedtag', 'Adobe'")],
+    ) -> str:
         """Find registration info for a company at Cannes Lions 2026. Searches both matched events and unmatched registrations."""
         events = _load_events()
         c = company.lower()
