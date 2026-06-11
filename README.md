@@ -1,6 +1,6 @@
 # Cannes Lions 2026 MCP
 
-Add the full Cannes Lions 2026 event schedule to ChatGPT, Claude, or any MCP-compatible AI agent. 259 events, enriched with classifications, speaker details, registration links, and crawled summaries.
+Add the full Cannes Lions 2026 event schedule to ChatGPT, Claude, or any MCP-compatible AI agent. 264 events, enriched with classifications, speaker details, registration links, and crawled summaries.
 
 **MCP endpoint:** `https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp`
 
@@ -52,28 +52,6 @@ Ask your AI agent natural questions about Cannes Lions 2026:
 claude mcp add cannes-lions --transport http https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp
 ```
 
-### Hermes (Self-Hosted)
-
-Hermes MCP servers are configured through the Hermes configuration file rather than a graphical interface.
-
-1. Open the Hermes configuration file at `/opt/data/config.yaml`.
-2. Locate the `tools` section.
-3. Add or configure the MCP-enabled tool according to the Hermes documentation for your version.
-4. Provide any required configuration values, such as API keys, server packages, or connection settings.
-5. Save the configuration and restart Hermes.
-
-Example:
-
-```yaml
-tools:
-  web_search:
-    enabled: true
-    provider: tavily
-    api_key: tvly-...
-```
-
-> The exact configuration structure varies between Hermes releases. Refer to the Hermes documentation for the MCP server configuration format supported by your version.
-
 ### Cursor / Windsurf
 
 Add to your `.cursor/mcp.json` or project MCP settings:
@@ -97,11 +75,23 @@ Point your client at the endpoint URL using StreamableHTTP transport. The server
 | `filter_events` | Multi-criteria filter combining audience, company type, event type, and day |
 | `get_event_details` | Full details for a specific event with fuzzy name matching |
 | `find_registration` | Registration links and notes for a specific company |
-| `list_registrations` | All known registration links across events and unmatched entries |
+| `list_registrations` | All known registration links across events |
+
+## Architecture
+
+The MCP server runs on [Modal](https://modal.com) as a stateless ASGI app with StreamableHTTP transport.
+
+**Data backend:** [Supabase](https://supabase.com) (PostgreSQL). Events are stored in a single `events` table with a generated `tsvector` column and GIN index for full-text search. The server queries Supabase via the PostgREST API on each request -- no caching layer, no stale data.
+
+**Search strategy:** `search_schedule` first tries PostgreSQL full-text search (`plainto_tsquery`). If that returns no results, it falls back to `ILIKE` pattern matching across five text columns. Other tools use PostgREST filtering (`eq`, `ilike`, ordering) for structured queries.
+
+**Fuzzy matching:** `get_event_details` loads all events and uses `thefuzz` (token set ratio) to find the closest match by event name, with a minimum score threshold of 50.
+
+**Secrets:** `SUPABASE_URL` and `SUPABASE_KEY` are stored in a Modal secret (`cannes-lions-config`) and injected at runtime.
 
 ## Data
 
-259 events across 6 days (Sunday 21 June -- Friday 26 June) plus 61 all-week venues.
+264 events across 6 days (Sunday 22 June -- Friday 27 June) plus all-week venues.
 
 Each event includes:
 - **Event name, host, day, date, time, location**
@@ -114,7 +104,7 @@ Each event includes:
 
 ### How the data is enriched
 
-An enrichment pipeline reads the source sheets via the Google Sheets API, extracts registration hyperlinks, crawls each event page for context, classifies events by company type, event type, and target audience, and writes everything to a clean master sheet. The MCP server reads the master sheet live on each request.
+An enrichment pipeline reads the source sheets via the Google Sheets API, extracts registration hyperlinks, crawls each event page for context, classifies events by company type, event type, and target audience, and writes everything to a clean master sheet. The enriched data is then migrated to Supabase for production queries.
 
 ## Credits
 
