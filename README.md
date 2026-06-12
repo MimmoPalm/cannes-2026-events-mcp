@@ -18,6 +18,8 @@ Ask your AI agent natural questions about Cannes Lions 2026:
 - "What panels are relevant for agencies this week?"
 - "Get me the registration link for the Microsoft Beach House"
 - "What invite-only events are happening on Thursday?"
+- "Where is the Equativ party?"
+- "How long to walk from the Google Beach to the Microsoft Beach House?"
 
 ## Setup
 
@@ -64,7 +66,7 @@ Add to your `.cursor/mcp.json` or project MCP settings:
 
 Point your client at the endpoint URL using StreamableHTTP transport. The server is stateless, no session persistence required.
 
-## 8 tools
+## 10 tools
 
 | Tool | What it does |
 |---|---|
@@ -76,6 +78,8 @@ Point your client at the endpoint URL using StreamableHTTP transport. The server
 | `get_event_details` | Full details for a specific event with fuzzy name matching |
 | `find_registration` | Registration links and notes for a specific company |
 | `list_registrations` | All known registration links across events |
+| `get_event_location` | Venue location with Google Maps pin link for a specific event |
+| `get_directions_between_events` | Walking distance, estimated time, and Google Maps directions link between two events |
 
 ## Architecture
 
@@ -101,6 +105,7 @@ Each event includes:
 - **Registration URL** -- direct link extracted from the schedule sheet
 - **Crawled summary** -- 2-3 sentence description from the event's registration page
 - **Speakers** -- name, company, and title where available
+- **Coordinates** -- latitude/longitude for venue locations (91% coverage), enabling distance calculations and Google Maps links
 
 ### How the data is enriched
 

@@ -23,6 +23,7 @@ def web():
     from urllib.parse import quote
 
     import httpx
+    import math
     from thefuzz import fuzz
     from mcp.server.fastmcp import FastMCP
     from mcp.server.streamable_http import TransportSecuritySettings
@@ -174,14 +175,8 @@ def web():
         events = _load_events()
         if not events:
             return "No events data available."
-        best_match = None
-        best_score = 0
-        for e in events:
-            score = fuzz.token_set_ratio(event_name.lower(), (e.get("event_name") or "").lower())
-            if score > best_score:
-                best_score = score
-                best_match = e
-        if not best_match or best_score < 50:
+        best_match = _fuzzy_find(events, event_name)
+        if not best_match:
             return f"No event found matching '{event_name}'."
         return _format_event(best_match)
 
@@ -213,5 +208,94 @@ def web():
         if not lines:
             return "No registration links available."
         return f"Registration links ({len(lines)} total):\n\n" + "\n".join(lines)
+
+    # -- Location helpers --
+
+    def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+        """Return distance in metres between two lat/lng points."""
+        R = 6_371_000
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlam = math.radians(lng2 - lng1)
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _fuzzy_find(events: list[dict], name: str) -> dict | None:
+        """Find best fuzzy match for an event name. Returns None if score < 50."""
+        best, best_score = None, 0
+        for e in events:
+            score = fuzz.token_set_ratio(name.lower(), (e.get("event_name") or "").lower())
+            if score > best_score:
+                best_score = score
+                best = e
+        return best if best_score >= 50 else None
+
+    @mcp.tool()
+    def get_event_location(event_name: str) -> str:
+        """Get the location of a Cannes Lions 2026 event with a Google Maps link. Uses fuzzy matching on event name."""
+        events = _load_events()
+        if not events:
+            return "No events data available."
+        best_match = _fuzzy_find(events, event_name)
+        if not best_match:
+            return f"No event found matching '{event_name}'."
+        name = best_match.get("event_name", "")
+        location = best_match.get("location") or "No location listed"
+        lat = best_match.get("latitude")
+        lng = best_match.get("longitude")
+        parts = [f"**{name}**", f"Location: {location}"]
+        if lat and lng:
+            parts.append(f"Coordinates: {lat}, {lng}")
+            parts.append(f"Google Maps: https://www.google.com/maps?q={lat},{lng}")
+        else:
+            parts.append("Note: exact coordinates not available for this venue")
+        day = (best_match.get("day") or "").title()
+        start = best_match.get("start_time") or ""
+        end = best_match.get("end_time") or ""
+        if day:
+            time_str = f" | {start}-{end}" if start else ""
+            parts.append(f"When: {day}{time_str}")
+        return "\n".join(parts)
+
+    @mcp.tool()
+    def get_directions_between_events(from_event: str, to_event: str) -> str:
+        """Get walking distance and estimated time between two Cannes Lions 2026 events, with a Google Maps directions link."""
+        events = _load_events()
+        if not events:
+            return "No events data available."
+        ev_from = _fuzzy_find(events, from_event)
+        ev_to = _fuzzy_find(events, to_event)
+        if not ev_from:
+            return f"No event found matching '{from_event}'."
+        if not ev_to:
+            return f"No event found matching '{to_event}'."
+        name_from = ev_from.get("event_name", "")
+        name_to = ev_to.get("event_name", "")
+        loc_from = ev_from.get("location") or "unknown"
+        loc_to = ev_to.get("location") or "unknown"
+        lat1, lng1 = ev_from.get("latitude"), ev_from.get("longitude")
+        lat2, lng2 = ev_to.get("latitude"), ev_to.get("longitude")
+        parts = [
+            f"**From:** {name_from}",
+            f"Location: {loc_from}",
+            f"**To:** {name_to}",
+            f"Location: {loc_to}",
+        ]
+        if lat1 and lng1 and lat2 and lng2:
+            distance_m = _haversine(lat1, lng1, lat2, lng2)
+            walk_distance = distance_m * 1.3
+            walk_minutes = walk_distance / (5000 / 60)
+            parts.append(f"Straight-line distance: {distance_m:.0f}m")
+            parts.append(f"Estimated walking distance: {walk_distance:.0f}m")
+            parts.append(f"Estimated walking time: {walk_minutes:.0f} minutes")
+            parts.append(f"Google Maps directions: https://www.google.com/maps/dir/{lat1},{lng1}/{lat2},{lng2}/@{lat1},{lng1},15z/data=!4m2!4m1!3e2")
+        else:
+            missing = []
+            if not (lat1 and lng1):
+                missing.append(f"'{name_from}' ({loc_from})")
+            if not (lat2 and lng2):
+                missing.append(f"'{name_to}' ({loc_to})")
+            parts.append(f"Cannot calculate distance: coordinates not available for {', '.join(missing)}")
+        return "\n".join(parts)
 
     return mcp.streamable_http_app()
