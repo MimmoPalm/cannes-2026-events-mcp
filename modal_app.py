@@ -83,6 +83,9 @@ def web():
         etype = e.get("event_type") or ""
         if etype and etype != "other":
             parts.append(f"Type: {etype}")
+        speakers = e.get("speakers") or ""
+        if speakers:
+            parts.append(f"Speakers: {speakers}")
         summary = e.get("crawled_summary") or ""
         if summary:
             parts.append(f"Summary: {summary}")
@@ -168,6 +171,37 @@ def web():
             return f"No events matching filters: {', '.join(filters)}."
         result = "\n\n".join(_format_event(m) for m in matches)
         return f"Filtered events ({len(matches)} total):\n\n{result}"
+
+    @mcp.tool()
+    def search_speakers(query: str, limit: int = 20) -> str:
+        """Search for speakers or companies at Cannes Lions 2026. Finds events where a specific person is speaking or a specific company has speakers. Matches against speaker names, titles, and companies."""
+        q = quote(query)
+        # Search speakers column and host
+        params = f"select=*&or=(speakers.ilike.*{q}*,host.ilike.*{q}*)&speakers=neq.&order=day,start_time&limit={limit}"
+        matches = _query("events", params)
+        if not matches:
+            return f"No speakers or events found matching '{query}'."
+        parts = [f"Found {len(matches)} events with speakers matching '{query}':\n"]
+        for e in matches:
+            parts.append(f"**{e.get('event_name', '')}**")
+            host = e.get("host", "")
+            if host:
+                parts.append(f"Host: {host}")
+            speakers = e.get("speakers", "")
+            if speakers:
+                parts.append(f"Speakers: {speakers}")
+            day = (e.get("day") or "").title()
+            date = e.get("date") or ""
+            start = e.get("start_time") or ""
+            end = e.get("end_time") or ""
+            time_str = f"{start}-{end}" if start and end else start or ""
+            if day:
+                parts.append(f"When: {day} {date}" + (f" | {time_str}" if time_str else ""))
+            loc = e.get("location") or ""
+            if loc:
+                parts.append(f"Location: {loc}")
+            parts.append("---")
+        return "\n".join(parts)
 
     @mcp.tool()
     def get_event_details(event_name: str) -> str:
