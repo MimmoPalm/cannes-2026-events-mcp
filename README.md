@@ -14,6 +14,7 @@ Ask your AI agent natural questions about Cannes Lions 2026:
 - "Find all happy hours on Wednesday"
 - "What's Equativ doing at Cannes?"
 - "Who's speaking at the Adelaide event?"
+- "Is anyone from Google speaking at Cannes?"
 - "Show me all adtech networking events"
 - "What panels are relevant for agencies this week?"
 - "Get me the registration link for the Microsoft Beach House"
@@ -66,7 +67,7 @@ Add to your `.cursor/mcp.json` or project MCP settings:
 
 Point your client at the endpoint URL using StreamableHTTP transport. The server is stateless, no session persistence required.
 
-## 10 tools
+## 11 tools
 
 | Tool | What it does |
 |---|---|
@@ -75,6 +76,7 @@ Point your client at the endpoint URL using StreamableHTTP transport. The server
 | `list_schedule_by_host` | Every event from a specific company |
 | `recommend_events` | Personalized recommendations by role: publisher, brand, agency, adtech, senior leader |
 | `filter_events` | Multi-criteria filter combining audience, company type, event type, and day |
+| `search_speakers` | Find speakers by name or company, see who's speaking where |
 | `get_event_details` | Full details for a specific event with fuzzy name matching |
 | `find_registration` | Registration links and notes for a specific company |
 | `list_registrations` | All known registration links across events |
