@@ -26,28 +26,42 @@ Ask your AI agent natural questions about Cannes Lions 2026:
 
 ### ChatGPT
 
+**Prerequisite:** ChatGPT Plus or Pro subscription. Developer Mode is a beta feature.
+
 1. Copy the MCP endpoint URL above.
-2. Open ChatGPT and go to **Settings > Tools & Integrations > Add MCP Tool**.
-3. Paste the endpoint URL into the URL field.
-4. Click **Add** or **Connect**.
-5. If prompted, complete the authentication flow.
-6. The MCP tool will appear in your available tools list. Open a new chat to verify.
+2. Open ChatGPT and go to **Settings → Apps → Advanced settings**.
+3. Enable **Developer Mode**.
+4. Click **Add connector** and paste the endpoint URL.
+5. Complete the OAuth flow if prompted.
+6. The connector's tools will appear in your available tools. Open a new chat to verify.
 
 ### Claude Desktop
 
-**Option 1: Add through the UI**
+**Option 1: Add through the UI (recommended)**
 
 1. Open Claude Desktop.
-2. Go to **Settings > MCP Servers**.
-3. Click **Add Remote Server**.
+2. Click the **+** button in the chat box.
+3. Go to **Connectors → Manage Connectors**.
 4. Paste the endpoint URL.
 5. Complete authentication if prompted.
-6. Save the server.
 
 **Option 2: Configure manually**
 
-1. Add the server to your `claude_desktop_config.json` file under the `mcpServers` section, using the endpoint URL above.
-2. Restart Claude Desktop after saving the configuration.
+1. Open Claude Desktop and go to **Settings → Developer → Edit Config**.
+2. Add the server to your `claude_desktop_config.json` under `mcpServers` using `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "cannes-lions": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp"]
+    }
+  }
+}
+```
+
+3. Restart Claude Desktop.
 
 ### Claude Code (CLI)
 
