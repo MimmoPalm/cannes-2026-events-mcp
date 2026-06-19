@@ -14,6 +14,7 @@ app = modal.App("cannes-lions-mcp", image=image)
 
 @app.function(
     scaledown_window=300,
+    timeout=3600,
     secrets=[modal.Secret.from_name("cannes-lions-config")],
 )
 @modal.concurrent(max_inputs=100)
@@ -332,4 +333,17 @@ def web():
             parts.append(f"Cannot calculate distance: coordinates not available for {', '.join(missing)}")
         return "\n".join(parts)
 
-    return mcp.streamable_http_app()
+    # Block GET /mcp (SSE) to prevent Modal timeout loop.
+    # Clients must use POST /mcp (Streamable HTTP) instead.
+    from starlette.responses import Response
+
+    streamable = mcp.streamable_http_app()
+
+    async def _block_sse(scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "GET" and scope["path"] == "/mcp":
+            resp = Response("SSE transport not supported. Use POST.", status_code=405, headers={"Allow": "POST, DELETE"})
+            await resp(scope, receive, send)
+            return
+        await streamable(scope, receive, send)
+
+    return _block_sse
