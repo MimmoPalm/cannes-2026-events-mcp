@@ -1,6 +1,6 @@
 # Cannes Lions 2026 MCP
 
-Add the full Cannes Lions 2026 event schedule to ChatGPT, Claude, or any MCP-compatible AI agent. 264 events, enriched with classifications, speaker details, registration links, and crawled summaries.
+Add the full Cannes Lions 2026 event schedule to ChatGPT, Claude, or any MCP-compatible AI agent. 311 events, enriched with classifications, speaker details, registration links, crawled summaries, and venue coordinates with Google Maps links.
 
 **MCP endpoint:** `https://mimmopalm--cannes-lions-mcp-web.modal.run/mcp`
 

@@ -1,4 +1,9 @@
-"""Cannes Lions 2026 MCP Server — Enriched Edition.
+"""Cannes Lions 2026 MCP Server — Enriched Edition (DEPRECATED).
+
+⚠️ DEPRECATED — use modal_app.py instead. This file reads from GViz CSV
+(gviz/tq?tqx=out:csv) which produces garbled concatenated output and is
+BROKEN. The production server (modal_app.py) reads from Supabase directly.
+Do not deploy this file.
 
 Reads from the enriched MIMMS Cannes schedule sheet with company types,
 event types, target audiences, speaker details, and registration URLs.
